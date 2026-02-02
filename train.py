@@ -6,8 +6,44 @@ from catboost import CatBoostRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import shap
+import os
+
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["font.serif"] = ["Times New Roman"]
+plt.rcParams["axes.unicode_minus"] = False
+plt.rcParams["font.size"] = 12
+
+MORANDI = {
+    'red':    '#C66B6B',
+    'orange': '#D9A66C',
+    'purple': '#967BB6',
+    'green':  '#759F75',
+    'cyan':   '#7798B7',
+    'blue':   '#5D8CA8',
+    'grey':   '#A9A9A9',
+    'dark_grey': '#666666',
+    'bg':     '#F5F5F7',
+    'grid':   '#E0E0E0'
+}
+
+def setup_plot(title, xlabel, ylabel):
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=150)
+    ax.set_facecolor(MORANDI['bg'])
+    fig.patch.set_facecolor('white')
+    ax.grid(True, linestyle='--', color=MORANDI['grid'], alpha=0.7)
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
+    ax.set_xlabel(xlabel, fontsize=12, labelpad=10)
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=12, labelpad=10)
+    for spine in ax.spines.values():
+        spine.set_edgecolor('#CCCCCC')
+    return fig, ax
 
 CSV_FILE = "pixel8_training_data.csv"
+if not os.path.exists(CSV_FILE):
+    print(f"Error: {CSV_FILE} not found.")
+    exit()
+
 df = pd.read_csv(CSV_FILE)
 
 cols = ['cpu', 's_on', 'br', 'power_w', 'net_kbps', 'voltage_v']
@@ -63,26 +99,6 @@ explainer = shap.TreeExplainer(model)
 X_test_cb = test_df[features]
 shap_values = explainer.shap_values(X_test_cb)
 
-feature_importance = pd.DataFrame({
-    'feature': features,
-    'importance': np.abs(shap_values).mean(axis=0)
-}).sort_values(by='importance', ascending=False)
-
-print(feature_importance)
-
-plt.figure()
-shap.summary_plot(shap_values, X_test_cb, show=False)
-plt.title("SHAP Summary Plot: Impact on Power Residuals")
-plt.tight_layout()
-plt.savefig("shap_summary.png")
-
-plt.figure()
-shap.summary_plot(shap_values, X_test_cb, plot_type="bar", show=False)
-plt.title("SHAP Feature Importance (Bar)")
-plt.tight_layout()
-plt.savefig("shap_bar.png")
-
-
 A_test = get_A(test_df)
 y_test = test_df['power_w'].values
 
@@ -110,15 +126,30 @@ print(f"{'R²':<10} | {r21:.4f}           | {r22:.4f}")
 
 test_df_sorted = test_df.copy().sort_values(by='time')
 sorted_indices = test_df_sorted.index
-P_phys_sorted = pd.Series(P_phys_pred, index=test_df.index).loc[sorted_indices]
-P_hybrid_sorted = pd.Series(P_hybrid_pred, index=test_df.index).loc[sorted_indices]
+window_size = 300 
+if len(test_df_sorted) > window_size:
+    plot_df = test_df_sorted.iloc[:window_size]
+    P_phys_plot = pd.Series(P_phys_pred, index=test_df.index).loc[sorted_indices].iloc[:window_size]
+    P_hybrid_plot = pd.Series(P_hybrid_pred, index=test_df.index).loc[sorted_indices].iloc[:window_size]
+else:
+    plot_df = test_df_sorted
+    P_phys_plot = pd.Series(P_phys_pred, index=test_df.index).loc[sorted_indices]
+    P_hybrid_plot = pd.Series(P_hybrid_pred, index=test_df.index).loc[sorted_indices]
 
-plt.figure(figsize=(12, 6))
-plt.plot(test_df_sorted['time'], test_df_sorted['power_w'], 'k', alpha=0.4, label='Real')
-plt.plot(test_df_sorted['time'], P_phys_sorted, 'g:', label='Physics')
-plt.plot(test_df_sorted['time'], P_hybrid_sorted, 'r--', label='Hybrid')
-plt.title(f"Model Validation (R²={r22:.3f})")
-plt.xlabel("Time (s)")
-plt.ylabel("Power (W)")
-plt.legend()
-plt.savefig("eval_time_series.png")
+fig, ax = setup_plot(f"Model Validation", "Time Sequence", "Power Consumption (W)")
+
+ax.plot(plot_df['time'], plot_df['power_w'], 
+        color=MORANDI['grey'], alpha=0.4, linewidth=5, label='Real Measurement')
+
+ax.plot(plot_df['time'], P_phys_plot, 
+        color=MORANDI['blue'], linestyle='--', linewidth=2, alpha=0.8, label='Physics-Only Model')
+
+ax.plot(plot_df['time'], P_hybrid_plot, 
+        color=MORANDI['red'], linestyle='-', linewidth=2, alpha=0.9, label='Hybrid AI Model')
+
+ax.legend(frameon=True, facecolor='white', edgecolor='#DDDDDD', loc='upper left', fontsize=11)
+ax.set_ylim(bottom=0)
+
+plt.savefig("eval_time_series.png", bbox_inches='tight')
+print("\nSaved improved plot to eval_time_series.png")
+plt.close()
